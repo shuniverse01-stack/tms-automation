@@ -1,0 +1,93 @@
+name: TMS Schedule
+
+on:
+  schedule:
+    # 4시간마다(UTC). KST 기준 약 9,13,17,21,01,05시에 해당
+    - cron: "0 */4 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: tms-schedule
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  run-tests:
+    runs-on: self-hosted
+    timeout-minutes: 60
+    env:
+      CI: "1"
+      REPORT_BASE_URL: ${{ secrets.REPORT_BASE_URL }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      APPIUM_PORT: "4723"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11", cache: "pip" }
+
+      - name: Install Appium & Allure & deps
+        shell: pwsh
+        run: |
+          npm i -g appium @appium/driver-uiautomator2 allure-commandline
+          appium driver install uiautomator2
+          python -m pip install --upgrade pip
+          if (Test-Path requirements.txt) { pip install -r requirements.txt }
+
+      - name: Start Appium (background)
+        shell: pwsh
+        run: |
+          $env:APPIUM_ARGS="--allow-insecure=uiautomator2:chromedriver_autodownload --log-level debug"
+          Start-Process -FilePath "appium" -ArgumentList $env:APPIUM_ARGS -WindowStyle Hidden
+          # Wait port
+          $limit=60; $ok=$false
+          1..$limit | % {
+            try { (New-Object Net.Sockets.TcpClient).Connect("127.0.0.1",[int]$env:APPIUM_PORT); $ok=$true; break } catch { Start-Sleep 1 }
+          }
+          if (-not $ok) { throw "Appium not ready on :$($env:APPIUM_PORT) within $limit sec" }
+
+      - name: Run automation (PS)
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File .\run_tms_automation.ps1
+
+      - name: Prepare site (copy latest Allure report)
+        shell: pwsh
+        run: |
+          $latest = Get-ChildItem "allure-report" -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $latest) { throw "No allure-report generated" }
+          New-Item -ItemType Directory -Path site -Force | Out-Null
+          Copy-Item -Recurse -Force $latest.FullName site\latest
+          $stamp = Split-Path $latest.FullName -Leaf
+          New-Item -ItemType Directory -Path site\versions -Force | Out-Null
+          Copy-Item -Recurse -Force $latest.FullName ("site\versions\" + $stamp)
+
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: site }
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+      - name: Slack notify (public link)
+        if: always()
+        shell: pwsh
+        run: |
+          $url = "${{ secrets.REPORT_BASE_URL }}/latest/"
+          $payload = @{ text = "✅ TMS 테스트 완료`n• Report: $url`n• Runner: Self-hosted (USB device)" } | ConvertTo-Json -Compress
+          Invoke-RestMethod -Method Post -Uri $env:SLACK_WEBHOOK_URL -Body $payload -ContentType 'application/json'
+
+      - name: Stop Appium
+        if: always()
+        shell: pwsh
+        run: |
+          Get-Process -Name node -ErrorAction SilentlyContinue | ? { $_.Path -like "*appium*" } | Stop-Process -Force -ErrorAction SilentlyContinue
