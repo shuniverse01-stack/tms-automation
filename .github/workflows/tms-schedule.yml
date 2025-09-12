@@ -2,8 +2,7 @@ name: TMS Schedule
 
 on:
   schedule:
-    # 4시간마다(UTC). KST 기준 약 9,13,17,21,01,05시에 해당
-    - cron: "0 */4 * * *"
+    - cron: "0 */4 * * *"   # 4시간마다(UTC)
   workflow_dispatch: {}
 
 concurrency:
@@ -25,20 +24,42 @@ jobs:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
       APPIUM_PORT: "4723"
 
+    # 👉 기본 쉘을 Windows PowerShell(5.1)로 고정
+    defaults:
+      run:
+        shell: powershell
+
     steps:
       - uses: actions/checkout@v4
 
+      # 👉 이 Job 프로세스에서만 실행정책 우회
+      - name: Init PowerShell (bypass)
+        run: |
+          Write-Host "PSVersion:" $PSVersionTable.PSVersion
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+
       - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: "17" }
+        with:
+          distribution: temurin
+          java-version: "17"
 
       - uses: actions/setup-node@v4
-        with: { node-version: "20" }
+        with:
+          node-version: "20"
 
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11", cache: "pip" }
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # 👉 npm 전역 bin 경로를 PATH에 추가(Windows: %APPDATA%\npm)
+      - name: Add npm global bin to PATH
+        run: |
+          $npmRoot = npm prefix -g
+          echo "$npmRoot" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          Write-Host "Added npm bin: $npmRoot"
 
       - name: Install Appium & Allure & deps
-        shell: pwsh
         run: |
           npm i -g appium @appium/driver-uiautomator2 allure-commandline
           appium driver install uiautomator2
@@ -46,23 +67,19 @@ jobs:
           if (Test-Path requirements.txt) { pip install -r requirements.txt }
 
       - name: Start Appium (background)
-        shell: pwsh
         run: |
           $env:APPIUM_ARGS="--allow-insecure=uiautomator2:chromedriver_autodownload --log-level debug"
           Start-Process -FilePath "appium" -ArgumentList $env:APPIUM_ARGS -WindowStyle Hidden
-          # Wait port
           $limit=60; $ok=$false
-          1..$limit | % {
+          1..$limit | ForEach-Object {
             try { (New-Object Net.Sockets.TcpClient).Connect("127.0.0.1",[int]$env:APPIUM_PORT); $ok=$true; break } catch { Start-Sleep 1 }
           }
           if (-not $ok) { throw "Appium not ready on :$($env:APPIUM_PORT) within $limit sec" }
 
-      - name: Run automation (PS)
-        shell: pwsh
+      - name: Run automation (PowerShell script)
         run: powershell -ExecutionPolicy Bypass -File .\run_tms_automation.ps1
 
       - name: Prepare site (copy latest Allure report)
-        shell: pwsh
         run: |
           $latest = Get-ChildItem "allure-report" -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
           if (-not $latest) { throw "No allure-report generated" }
@@ -73,14 +90,14 @@ jobs:
           Copy-Item -Recurse -Force $latest.FullName ("site\versions\" + $stamp)
 
       - uses: actions/upload-pages-artifact@v3
-        with: { path: site }
+        with:
+          path: site
 
       - id: deploy
         uses: actions/deploy-pages@v4
 
       - name: Slack notify (public link)
         if: always()
-        shell: pwsh
         run: |
           $url = "${{ secrets.REPORT_BASE_URL }}/latest/"
           $payload = @{ text = "✅ TMS 테스트 완료`n• Report: $url`n• Runner: Self-hosted (USB device)" } | ConvertTo-Json -Compress
@@ -88,6 +105,5 @@ jobs:
 
       - name: Stop Appium
         if: always()
-        shell: pwsh
         run: |
-          Get-Process -Name node -ErrorAction SilentlyContinue | ? { $_.Path -like "*appium*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+          Get-Process -Name node -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "*appium*" } | Stop-Process -Force -ErrorAction SilentlyContinue
