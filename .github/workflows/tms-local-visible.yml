@@ -1,68 +1,30 @@
-name: TMS Local (Visible)
+name: TMS PS1 Only (Visible)
 
 on:
-  # 4시간마다(UTC). 8시간 주기 원하면 */8 로 변경
   schedule:
-    - cron: "0 */4 * * *"
+    - cron: "0 */4 * * *"   # 4시간마다(UTC). 원하면 */8 로 변경
   workflow_dispatch: {}
 
 concurrency:
-  group: tms-local-visible
+  group: tms-ps1-only
   cancel-in-progress: true
 
 jobs:
-  run-local:
+  run-local-ps1:
     runs-on: [self-hosted, Windows]
     defaults:
       run:
         shell: powershell
-    env:
-      # 로컬 경로 & 환경
-      APP_DIR: 'D:\appium_project'
-      APPIUM_PORT: '4723'
-      # 선택: Slack/외부 리포트 URL이 ps1에서 필요하면 Secrets 로 주입
-      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-      REPORT_BASE_URL:   ${{ secrets.REPORT_BASE_URL }}
 
     steps:
-      - name: Pre-checks (paths & ADB)
+      - name: Run local PS1 in a VISIBLE PowerShell window (exact commands)
         run: |
-          if (-not (Test-Path "$env:APP_DIR\run_tms_automation.ps1")) {
-            throw "Missing: $env:APP_DIR\run_tms_automation.ps1"
-          }
-          Write-Host "where appium:"; where appium
-          Write-Host "`nadb devices:"; adb devices
-
-      - name: Free port ${{ env.APPIUM_PORT }}
-        run: |
-          $conn = Get-NetTCPConnection -LocalPort $env:APPIUM_PORT -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($conn) { Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue | Stop-Process -Force }
-
-      - name: Start Appium in VISIBLE cmd window
-        run: |
-          $args = "--allow-insecure=uiautomator2:chromedriver_autodownload --log-level debug -p $env:APPIUM_PORT"
-          $appium = Start-Process cmd.exe -ArgumentList "/k appium $args" -PassThru -WindowStyle Normal
-          "APPIUM_PID=$($appium.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-          # 포트 대기 (최대 120초)
-          $limit = 120; $ok = $false
-          1..$limit | ForEach-Object {
-            try { (New-Object Net.Sockets.TcpClient).Connect('127.0.0.1',[int]$env:APPIUM_PORT); $ok=$true; break }
-            catch { Start-Sleep 1 }
-          }
-          if (-not $ok) { throw "Appium not ready on :$($env:APPIUM_PORT) within $limit sec" }
-
-      - name: Run PS1 in VISIBLE PowerShell (wait)
-        run: |
+          # 요청하신 두 줄을 그대로 실행:
+          # 1) cd D:\appium_project
+          # 2) powershell -ExecutionPolicy Bypass -File run_tms_automation.ps1
+          $cmd = 'cd D:\appium_project; powershell -ExecutionPolicy Bypass -File run_tms_automation.ps1'
           $p = Start-Process powershell.exe `
-                -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',"$env:APP_DIR\run_tms_automation.ps1" `
-                -WorkingDirectory $env:APP_DIR `
-                -WindowStyle Normal `
-                -PassThru
+                -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command', $cmd `
+                -WindowStyle Normal -PassThru
           $p.WaitForExit()
-          if ($p.ExitCode -ne 0) { throw "run_tms_automation.ps1 exited with $($p.ExitCode)" }
-
-      - name: Stop Appium (cleanup)
-        if: always()
-        run: |
-          if ($env:APPIUM_PID) { Stop-Process -Id $env:APPIUM_PID -Force -ErrorAction SilentlyContinue }
+          if ($p.ExitCode -ne 0) { throw "run_tms_automation.ps1 exited with code $($p.ExitCode)" }
