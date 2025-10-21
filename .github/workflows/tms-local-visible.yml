@@ -24,7 +24,9 @@ jobs:
           # 2) powershell -ExecutionPolicy Bypass -File run_tms_automation.ps1
           $cmd = 'cd D:\appium_project; powershell -ExecutionPolicy Bypass -File run_tms_automation.ps1'
           $p = Start-Process powershell.exe `
-                -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command', $cmd `
-                -WindowStyle Normal -PassThru
+                    -WorkingDirectory 'D:\appium_project' `
+                    -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command', $cmd `
+                    -WindowStyle Normal -PassThru
+
           $p.WaitForExit()
           if ($p.ExitCode -ne 0) { throw "run_tms_automation.ps1 exited with code $($p.ExitCode)" }
