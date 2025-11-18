@@ -19,26 +19,14 @@ jobs:
     steps:
       - name: Run local PS1 in a VISIBLE PowerShell window (exact commands)
         run: |
-          # 1차 실행: D:\appium_project
-          $cmd1 = 'cd D:\appium_project; powershell -ExecutionPolicy Bypass -File run_tms_automation.ps1'
+          # 요청하신 두 줄을 그대로 실행:
+          # 1) cd D:\appium_project
+          # 2) powershell -ExecutionPolicy Bypass -File run_tms_automation.ps1
+          $cmd = 'cd D:\appium_project; powershell -ExecutionPolicy Bypass -File run_tms_automation.ps1'
           $p = Start-Process powershell.exe `
                     -WorkingDirectory 'D:\appium_project' `
-                    -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command', $cmd1 `
+                    -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command', $cmd `
                     -WindowStyle Normal -PassThru
 
           $p.WaitForExit()
-          if ($p.ExitCode -ne 0) {
-            throw "run_tms_automation.ps1 (D:\appium_project) exited with code $($p.ExitCode)"
-          }
-
-          # 2차 실행: D:\appium_project\stamp
-          $cmd2 = 'cd D:\appium_project\stamp; powershell -ExecutionPolicy Bypass -File run_tms_automation.ps1'
-          $p2 = Start-Process powershell.exe `
-                    -WorkingDirectory 'D:\appium_project\stamp' `
-                    -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command', $cmd2 `
-                    -WindowStyle Normal -PassThru
-
-          $p2.WaitForExit()
-          if ($p2.ExitCode -ne 0) {
-            throw "run_tms_automation.ps1 (D:\appium_project\stamp) exited with code $($p2.ExitCode)"
-          }
+          if ($p.ExitCode -ne 0) { throw "run_tms_automation.ps1 exited with code $($p.ExitCode)" }
