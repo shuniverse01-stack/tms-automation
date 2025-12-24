@@ -3,7 +3,7 @@ name: TMS PS1 Only (Visible)
 on:
   workflow_dispatch: {}     # 수동 실행 → 즉시 1회 실행
   schedule:
-    - cron: "0 * * * *"  # 1시간 간격
+    - cron: "0 */6 * * *"  # 매일 00 / 06 / 12 / 18시(UTC) 에 실행 시도
 
 concurrency:
   group: tms-ps1-only
